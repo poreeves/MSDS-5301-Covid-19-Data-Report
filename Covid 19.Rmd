@@ -1,0 +1,240 @@
+---
+title: "MSDS 5301 Covid 19 Data"
+author: "Philip Reeves"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+```
+
+## MSDS 5301 Covid 19 Data Report
+
+# Import US Covid Data
+The Covid 19 data set used was accumulated by John Hopkins University Center for Systems Science and Engineering. The data was gathered from a number of different sources, including the World Health Organization and the United States Department of Health.The data sets used in this report represent Covid 19 cases and deaths recorded each day starting on January 21st, 2020. Along with case and death figures, the data set includes state, county, and population data.  
+Analyzing this data can help understand the spread of the Covid-19 virus. It can help identify factors that contributed to a higher number of new cases and deaths from Covid-19. It can highlight areas of the country that had successful Covid-19 response and areas that did not. 
+
+```{r import_covid_data}
+url_in <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
+file_names <-
+  c("time_series_covid19_confirmed_US.csv",
+    "time_series_covid19_deaths_US.csv")
+urls <- str_c(url_in,file_names)
+US_cases <- read.csv((urls[1]),check.names=FALSE)
+US_deaths <- read_csv(urls[2])
+```
+
+# Clean Up US Covid Data
+Two data sets were imported, representing the cases and death recorded for each day by county since January 21st, 2020. I combined the two set focusing on the date, state, county, and population. Other features, such as longitude and latitude, were omitted. 
+
+```{r clean_covid_data and join us cases and deaths}
+US_cases <- US_cases %>%
+  pivot_longer(cols = -(UID:Combined_Key),
+               names_to = "date",
+               values_to = "cases") %>%
+  select(Admin2:cases) %>%
+  mutate(date = mdy(date)) %>%
+  select(-c(Lat,Long_))
+
+US_deaths <- US_deaths %>%
+  pivot_longer(cols = -(UID:Population),
+               names_to = "date",
+               values_to = "deaths") %>%
+  select(Admin2:deaths) %>%
+  mutate(date = mdy(date)) %>%
+  select(-c(Lat,Long_))
+
+US <- US_cases %>%
+  full_join(US_deaths)
+```
+
+# us Covid Data Grouped by State
+To begin understanding the data set, I added two features that tracked the new cases and deaths reported by each state. I combined each county based on their respected state or province. To see how different states with different geography were impacted by Covid-19, I looked at two island states/US provinces Hawaii and Puerto Rico. I compared these two island territories with two mainland states that had a similar population. In Figure - 1 we can see how Hawaii and New Hampshire, both with populations roughly around 1.4 million, rates of new cases varied at the onset of the pandemic. In Figure - 2, we see Puerto Rico and Utah, both with populations around 3.3 million, seem to rise and fall at the same time during the beginning of the pandemic, with Puerto Rico reporting less new cases. During the middle of the pandemic Puerto Rico seems have a slight spike, over taking Utah;s number of new cases then dropping. As we get closer to the present, we can see the two state/provinces start to follow a similar pattern again. Comparing island state/provinces and mainland states might provided an insight on how geography can play a role in the spread of Covid-19. Further population demographics and density data would be helpful to explore this idea further.  
+Exploring the total number of deaths by state could give provide insight on the spread of Covid-19 as well.
+
+```{r group Data by State}
+US_by_state <- US %>%
+  group_by(Province_State, Country_Region, date) %>%
+  summarize(cases = sum(cases),deaths = sum(deaths),
+            Population = sum(Population)) %>%
+  mutate(deaths_per_mill = deaths * 1000000 / Population) %>%
+  select(Province_State, Country_Region, date, cases, deaths, deaths_per_mill, Population) %>%
+  ungroup()
+US_by_state <- US_by_state %>%
+  mutate(new_cases = cases - lag(cases),
+         new_deaths = deaths - lag(deaths))
+```
+# States of Hawaii and Puerto Rico 
+
+```{r Select for Hawaii and Puerto Rico}
+US_by_state %>%
+  filter(Province_State == "Hawaii" |
+           Province_State =="New Hampshire") %>%
+  filter(cases >0) %>%
+  ggplot(aes(x=date,y=new_cases,color=Province_State)) +
+  geom_point() +
+  scale_y_log10() +
+  labs(title = "Hawaii VS New Hampshire",
+       subtitle = "Comparing island and mainland States and Provinces",
+       colour = "State/Province",
+       x = "Date (2020 - 2022)",
+       y = "Number of New Cases",
+       caption = "(Figure - 1)")
+
+US_by_state %>%
+  filter(Province_State =="Puerto Rico" |
+           Province_State == "Utah") %>%
+  filter(cases >0) %>%
+  ggplot(aes(x=date,y=new_cases,color=Province_State)) +
+  geom_point() +
+  scale_y_log10() +
+  labs(title = "Puerto Rico VS Utah",
+       subtitle = "Comparing island and mainland States and Provinces",
+       colour = "State/Province",
+       x = "Date (2020 - 2022)",
+       y = "Number of New Cases",
+       caption = "(Figure - 2)")
+
+```
+
+# Total Deaths By State
+In Figure - 3  and Figure - 4, I looked at the total number of deaths in each state by population. In Figure - 3, we can see that as a state's population increases, so does the number of total deaths. This is somewhat expected. Let's take a closer look at those states that seem to fall above and below the linear projection line. In Figure - 4, we can see that California, with the highest population around 40 million, has about 20 thousand less deaths than the model predicted. Conversely, Florida, with a population around 21 million, has about 15 thousands deaths higher than the model. It would be interesting to investigate how these two states differ in population demographics and density, as well as their Covid 19 responses.  
+Now that we've looked at overall deaths by state population, lets take a look at the difference between counties.
+```{r total the deaths by state}
+US_by_state[is.na(US_by_state)] <- 0
+US_total_deaths_state <- US_by_state %>%
+  group_by(Province_State,Population) %>%
+  summarize(deaths = max(deaths)) %>%
+  mutate(deaths_per_thou = deaths *1000 / Population) %>%
+  select(Province_State,deaths, deaths_per_thou, Population) %>%
+  ungroup()
+
+US_total_deaths_state <- US_total_deaths_state %>%
+  filter(Population > 0)
+
+US_total_deaths_state %>%
+  filter(deaths > 0) %>%
+  ggplot(aes(x = Population,y = deaths, color = "Deaths")) +
+  geom_point() +
+  geom_smooth(method=lm, se=FALSE, aes(color = "Model")) +
+  labs(title = "Total COVID Deaths by State Population",
+       subtitle = "(2020-2022)",
+       colour = "",
+       x = "Population",
+       y = "Total Deaths",
+       caption = "(Figure - 3)")
+
+mod_deaths_by_state_pop <- lm(deaths ~ Population,
+                              data= US_total_deaths_state)
+summary(mod_deaths_by_state_pop)
+
+US_t_deaths_state_pred <- US_total_deaths_state %>%
+  mutate(pred = predict(mod_deaths_by_state_pop),
+         dif_pred = deaths - pred)
+
+US_t_deaths_state_pred %>% slice_max(dif_pred, n = 1)
+US_t_deaths_state_pred %>% slice_min(dif_pred, n = 1)
+
+US_t_deaths_state_pred %>%
+  filter(deaths > 0) %>%
+  ggplot(aes(x = Population,y = deaths, color = "Deaths")) +
+  geom_point() +
+  geom_line(aes(x = Population, y = pred, color = "Model" )) +
+  geom_point(data = US_t_deaths_state_pred %>% slice_max(dif_pred, n = 1),
+             aes(x = Population, y = pred, color= "Florida Predictions" ),
+             size = 3) +
+  geom_point(data = US_t_deaths_state_pred %>% slice_max(dif_pred, n = 1),
+             aes(x = Population, y = deaths, color= "Florida Deaths" ),
+             size = 3) +
+  geom_point(data = US_t_deaths_state_pred %>% slice_min(dif_pred, n = 1),
+             aes(x = Population, y = pred, color= "California Predictions" ),
+             size = 3) +
+  geom_point(data = US_t_deaths_state_pred %>% slice_min(dif_pred, n = 1),
+             aes(x = Population, y = deaths, color= "California Deaths" ),
+             size = 3) +
+  #geom_smooth(method=lm, se=FALSE, color="darkred") +
+  labs(title = "Total COVID Deaths by State Population",
+       subtitle = "(2020-2022)",
+       colour = "",
+       x = "Population",
+       y = "Total Deaths",
+       caption = "(Figure - 4)")
+
+  
+```
+
+# Total Deaths by County 
+Similar to the states data set, I focused on the county population and total number of deaths.In Figure - 5, we can see the number of deaths seem to increase with the population of each county. As we did with the state data, lets take a look at the differences between the model projections and the reported figures. In Figure - 6, we can see that Kings County, NY, with a population of about 2.5 million, has around 5.4 thousand more deaths then predicted. Where as, San Diego, CA, with a population of approximately 3.3 million, has about 4.6 thousand less deaths. As with the state data, it would be interesting to investigate the difference between these two counties to see what other variables could be contributing to these differences. Data on population demographics and density may shed light on these differences. 
+
+```{r total deaths by county}
+US_total_deaths_by_county <- US %>%
+  group_by(Admin2,Province_State,Population) %>%
+  summarize(deaths = max(deaths)) %>%
+  mutate(deaths_per_thou = deaths *1000 / Population) %>%
+  select(Admin2, Province_State,deaths, deaths_per_thou, Population) %>%
+  drop_na() %>%
+  ungroup()
+US_total_deaths_by_county <- US_total_deaths_by_county %>%
+  filter(Population > 0)
+
+mod_deaths_by_county_pop <- lm(deaths ~ Population, 
+                               data = US_total_deaths_by_county)
+summary(mod_deaths_by_county_pop)
+
+US_t_d_county_w_pred <- US_total_deaths_by_county %>% 
+  mutate(pred = predict(mod_deaths_by_county_pop),
+         dif_pred = deaths - pred)
+
+US_total_deaths_by_county %>%
+  filter(deaths > 0) %>%
+  ggplot(aes(x = Population,y = deaths, color = "Deaths")) +
+  geom_point() +
+  geom_smooth(method=lm, se=FALSE, aes(color = "Model")) +
+  labs(title = "Total COVID Deaths by County Population",
+       subtitle = "(2020-2022)",
+       colour = "",
+       x = "Population",
+       y = "Total Deaths",
+       caption = "(Figure - 5)")
+
+US_t_d_county_w_pred %>% slice_max(dif_pred, n = 1)
+US_t_d_county_w_pred %>% slice_min(dif_pred, n = 1)
+
+US_t_d_county_w_pred  %>%
+  filter(deaths > 0) %>%
+  ggplot(aes(x = Population,y = deaths, color= "Deaths")) +
+  geom_point() +
+  geom_line(aes(x = Population,y = pred, 
+                 color = "Predictions")) +
+  geom_point(data = US_t_d_county_w_pred %>% slice_max(dif_pred, n = 1), 
+             aes(x = Population,y = pred, 
+                 color = "Kings, NY Prediction"),size = 3) +
+  geom_point(data = US_t_d_county_w_pred %>% slice_min(dif_pred, n = 1), 
+             aes(x = Population,y = pred,
+                 color = "San Diego, CA Prediction"),size = 3) +
+  geom_point(data = US_t_d_county_w_pred %>% slice_max(dif_pred, n = 1), 
+             aes(x = Population,y = deaths,
+                 color = "Kings, NY Deaths"),size = 3) +
+  geom_point(data = US_t_d_county_w_pred %>% slice_min(dif_pred, n = 1), 
+             aes(x = Population,y = deaths,
+                 color = "San Diego, CA Deaths"),size = 3) +
+  #geom_smooth(method=lm, se=FALSE, color="darkred") +
+  labs(title = "Total Deaths by County Population with Prediction",
+       subtitle = "(2020-2022)",
+       colour = "",
+       x = "Population",
+       y = "Total Deaths",
+       caption = "(Figure - 6)")
+
+```
+
+# Conclusion and Possible Bias in Covid-19 Data and Report
+Covid-19 impacted everyone in the world in one way or another.By looking at the Covid-19 data, it appears that the total population can impact the number of new cases and deaths. However, I would caution drawing to many conclusions. To me it makes sense, more people, more cases. However, by looking at areas that do not strictly adhere to that notion can shed light on what other factors contributed. Looking at other variables, such as population density and geography, could provide more insight on how the population can impact the spread of Covid-19.  
+There could be inherent bias within the data set. Since it was gathered from numerous sources and then aggregated there is a possibility for a number of issues: duplicate or missing data, clerical errors in reporting, and under or over reporting of figures. Before I started my analysis, I had the inclination that the more populous the state or county, there would be more cases and deaths reported. Confirmation bias could have played in a roll in my analysis.
+I believe that population plays a role in the number of cases and deaths. Further research into factors such as population demographics, population density, and geography would be worthwhile to help understand the spread of Covid-19 and how to best prevent a future pandemic. 
